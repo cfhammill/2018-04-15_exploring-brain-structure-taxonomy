@@ -1,0 +1,611 @@
+---
+title: Analyzing Brain Structure Trees with Stan
+author: Chris Hammill
+date: April 13, 2018
+output:
+  html_document:
+    code_folding: hide
+---
+
+## Introduction
+
+Traditional approaches to analyzing brain anatomy focus on attempting to localize
+the brain regions associated with a given covariate. To facilitate this, anatomy is 
+often summarized down to a collection of structures via an atlas, defined by expert 
+anatomists. An atlas partitions the brain into non-overalapping structures, much the 
+way a map might  partition a country into states or provinces. This has benefits in
+reducing measurement noise by pooling observations with a region, and by providing
+a vocabulary for describing where in the brain an effect occurs.
+
+Once structures have been defined, many different properties can be measured.
+Examples range from amount of gene expression to geometric properties of the 
+structure depending on the research question. In this analysis, we're
+going to focus on the volume of structure, which has been measures using
+magnetic resonance imaging (MRI). 
+
+Regions are defined by anatomists typically by visible boundaries and shared development.
+My lab predominantly works with mouse MRI and over the years has produced one of the most
+detailed high resolution MRI atlases of the mouse brain. 
+
+<br>
+![](dsurqe.png)
+<br>
+
+From the perspective of shared 
+development, it is natural to consider the structures in an atlas as the leaves of 
+an taxonomy tree. Parent nodes generally indicating collections of leaves with a degree
+of shared development. Conveniently, a large brain imaging group --
+the Allen Brain Institute (ABI) -- has organized their atlases in just such a way. 
+
+<br>
+![](abi.png)
+<br>
+
+By adapting our our high resolution MRI atlas, it can be combined with the 
+ABI's histological atlas. This allows us to divide the mouse brain into a 
+hierarchy of structures, and compute volumes in a automated way.
+
+## The problem
+
+Historically, each region has been treated as essentially independent. Individuals
+will have their brains characterized with MRI, the brains are aligned to the atlas
+and the volumes for each region of each subject's brain are measured. The volumes
+at each structure are then analyzed with separate linear models.
+
+There are some problems with this approach:
+
+1. Regions are not independent, proximity in space or similarity by development
+  cause regions to receive similar genetic and environmental effects.
+2. Regions are not homogeneous, the structure volume effects variance, with small
+  structures having high noise
+3. Partitioning effort isn't uniform across the brain. "Interesting regions" get 
+   subdivided into smaller regions. 
+4. Regions may be too small for reliable measurement and should be merged to
+   improve sensitivity.
+
+Our goals are to improve on this situation by doing the following.
+
+- Pool information between structures.
+- Use structure taxonomy information to guide the pooling.
+- Use results to decide when small structures should be merged.
+- Localize effects to taxonomic origins, possibly giving hints
+  to when an effect occurs developmentally.
+- Fit everything with stan
+
+## New models
+
+In order to accomplish our goals, we're going to try two different
+bayesian models that will encourage pooling between structures.
+
+1. A standard hierarchical model fit with `rstanarm`'s `stan_lmer` function.
+2. A tree based model where effects diffuse down the tree as a gaussian
+   random walk. The covariate effect at each child node is the effect
+   at their parent plus some gaussian noise. Hopefully this encourages effects
+   to pool up the tree when structures are small but similar.
+   
+This second model I've been calling the effect diffusion tree. It is
+a small change to the model used in `stan_lmer`. An example model we'd
+like to fit using either `stan_lmer` or the effect diffusion tree is
+something of the form: 
+
+`y ~ grp + (grp | structure) + (1 | individual)`
+
+Where `y` is our volumes, `grp` is a grouping covariate of interest,
+`structure` is the brain structure, and `individual` is the mouse.
+For simplicity we will assume there are two groups.
+
+This model amounts to 
+
+$$ y_{is} = \boldsymbol{\beta} \mathbf{x}_i^t + \boldsymbol{\beta}_{s} \mathbf{x}_i^t  + r_i + \epsilon_{is}$$
+
+with $i$ indexing individuals, $g$ indexing groups, and $s$
+indexing structures. Here $x$ is a two component vector, one for the
+intercept, and one for the group. Both $\boldsymbol{\beta}$ and $\boldsymbol{\beta}_s$ 
+are two component vectors, with intercept and group coefficients, $r_i$ is a 
+scalar with the per individual intercept. All $\epsilon$'s used in
+this document are indepent gaussian noise.
+
+The group specific parameters $b_s$ are parameterized by a non-centered
+multivariate normal distribution.
+
+$$ \boldsymbol{\beta}_s = \Sigma^{1/2} \boldsymbol{\epsilon}_{s} $$
+
+Where $\Sigma$ is the 2x2 covariance matrix for the two parameters and
+$\Sigma^{1/2}$ is its cholesky factor.
+
+The effect diffusion model modifies this slightly by centering group specific
+parameters on the value of their parent.
+
+$$ \boldsymbol{\beta}_s = \boldsymbol{\beta}_{p_s} + \Sigma^{1/2} \boldsymbol{\epsilon}_{s} $$
+
+Where $p_s$ is the index of the parent node.
+
+Both models use an lkj prior for $\Sigma$. For the effect diffusion model
+this is the covariance parameter for the change in effect associated with
+taking a step from a parent to a child node. Originally the model had been
+formulated such that each parent node had their own covariance parameter,
+Unfortunately, these models were couldn't be fit, so only 
+one global covariance is estimated.
+  
+## The data
+
+In order to experiment with using bayesian methods for these data,
+First we will consider the data. Regional brain volumes from traditional MRI
+analyses were gathered by members of my lab. For this analysis we will use a 
+subset of the mice from our open data release of ~700 mouse brain images 
+(1000+ more coming soon), hosted by the Ontario Brain Institute
+https://www.braincode.ca/content/open-data-releases.
+
+The data release includes volumes for each leaf structure. Parent node volumes
+were calculated by summing the volume of their children.
+
+After the parent node volumes have been computed, they can be added back to
+the volume matrix, and converted into long-format for easy modelling.
+
+The long format data will be processed with both models. But first we'll
+compare the models with some simulations.
+
+## Simulations
+
+To check that the effect diffusion tree induces a reasonable prior, we're going
+simulate some data and try it and `stan_lmer` out.
+
+### Init
+
+First we'll read in some R packages. Most of the utility functions used are in
+the package `hierarchyTrees`, distributed with this document. Included are functions
+for manipulating trees using the `data.tree` package, producing simulated data for
+trees, and generating the required data to run the `stan_lmer` and diffusion tree
+models. This code also makes heavy use of `dplyr` and `purrr`. 
+
+```{r}
+knitr::opts_chunk$set(cache.lazy = FALSE)
+
+## If necessary devtools::install_github("cfhammill/hierarchyTrees")
+
+options(mc.cores = 4)
+suppressPackageStartupMessages({
+  library(hierarchyTrees)
+  library(bayesplot)
+  library(rlang)
+  library(loo)
+})
+
+set.seed(20180406)
+```
+
+### Read In
+
+Now we need to get some data. This is a small subset of 20 male
+and 20 female control mice. We'll be simulating the effect of
+sex on the brain structure taxonomy.
+
+```{r read_in, cache = TRUE}
+metadata <- readRDS("metadata.rds")
+anat_vols <- readRDS("anat_vols.rds")
+
+defsFile <- "DSURQE_40micron_R_mapping.csv"
+vols_hierarchical <- readRDS("vis_areas.rds")
+
+leaves <- vols_hierarchical$Get("name", filterFun = isLeaf)
+parents <- vols_hierarchical$Get("name", filterFun = function(n) !isLeaf(n))
+
+indivs <- metadata$ID
+indiv_effects <- map_dbl(indivs, function(i) rnorm(1, 0, .05))  
+```
+
+### Inspect the tree
+
+Simulation will be done on a small subset of the whole tree, in particular
+the visual areas.
+
+```{r}
+fix_names_and_plot(vols_hierarchical)
+vols_hierarchical
+```
+
+### Simulation function
+
+We're going to define a utility function to create trees given the following 
+characterestics
+
+1. noise_sd: What sd should the simulated noise have
+2. leaf_effects: A vector of effects to add at the leaf nodes
+3. indiv_effects: A vector of random intercept per individual
+4. meta: A vector with a single covariates
+5. base_tree: The tree to simulate data for
+6. extra_effects: Additional effects to add at non-leaf nodes. Useful
+   to induce changes that follow the taxonomy.
+
+```{r util, cache = TRUE, dependson = "read_in"}
+local_create_tree <- function(noise_sd, leaf_effects
+                            , leaf_vols = leaf_volumes
+                            , indiv_effs = indiv_effects, meta = metadata$SEX
+                            , base_tree = vols_hierarchical
+                            , extra_effects = NA){
+  leaf_vols <- leaf_effects * 0 ## This argument is ignored now
+  create_tree(noise_sd, leaf_effects, leaf_vols, indiv_effs, metadata = meta
+            , base_tree = base_tree, extra_effects = extra_effects)
+}
+```
+
+### Setup Experiment Grid
+
+Now we're going to generate an experiment grid to examine the performance
+of the two models. First we're going to randomly generate leaf effects 
+with mean = 0, sd = .1. We'll test all combinations of:
+
+1. Signal to noise ratio {.5,1,2}. The ratio of the mean effect to the
+   sd of the per observation noise.
+2. Hierarchical effects {yes,no}. Whether or not to add extra effects,
+   if so, add an extra effect equal to the mean leaf effect at nodes in
+   the lateral visual area. Subtract the mean leaf effect from every node
+   in the primary visual area.
+   
+This will produce 6 trees to experiment on. Which we will fit with both
+models.
+
+```{r grid, cache = TRUE, dependson = "util"}
+exp_grid <-
+  crossing(snr = c(.5,1,2)
+         , hier_eff = c(TRUE, FALSE)) %>%
+  mutate(leaf_effects =
+           map(snr, ~ rnorm(length(leaves), 0, .1) %>% setNames(leaves))
+       , mean_eff = map_dbl(leaf_effects, ~ mean(abs(.)))
+       , noise = map2_dbl(mean_eff, snr, ~ .x/.y)
+       , extra_effects = 
+           map2(hier_eff, mean_eff
+             , ~ `if`(.x
+                    , c("Lateral visual area" = .y
+                      , "Primary visual area" = -.y)
+                    , NA)))
+```
+
+now we'll take the experiment grid and create the trees, then extract
+from the trees the data needed to fit the model.
+
+```{r grid2, cache = TRUE, dependson = "grid"}
+exp_grid <-
+  exp_grid %>%
+  mutate(
+    ## Triple bang turns a list into arguments
+    ## This will create two list columns, effects - with the composite effects
+    ## and tree - with the simulated tree
+    !!! transpose(pmap(., function(leaf_effects, noise, extra_effects, ...){
+      local_create_tree(noise, leaf_effects, extra_effects = extra_effects)
+    }))
+  ) %>%
+  mutate(
+    ## This adds hvft - the data frame for stan_lmer and
+    ## hept - the data for the diffusion tree
+    !!! transpose(map(.$tree, function(tr) tree_to_ept_data(tr, metadata)))
+  )
+```
+
+### Compile the tree model
+
+Let's compile the tree model using a convenience function from `hierarchyTrees`
+
+```{r compilation, cache = TRUE, message = FALSE, warning = FALSE}
+## To view the model run:
+## file.show(
+##   system.file("models/effect_diffusion_tree.stan"
+##             , package = "hierarchyTrees"))
+
+edt_sm <- compile_models("effect_diffusion_tree") 
+```
+
+### Run the models
+
+Now that the necessary data has been generated we can fit the
+models for the whole grid. This will take an hour or so on
+a 4 core computer.
+
+```{r fit_models, cache = TRUE, dependson = c("grid2", "compilation")}
+model_fits <-
+  exp_grid %>%
+  mutate(edt =
+           map(hept 
+             , function(d) sampling(edt_sm
+                                  , control = list(max_treedepth = 15
+                                                 , adapt_delta = .99)
+                                  , data = d
+                                  , open_progress = FALSE))
+       , slmer =
+           map(hvft
+             , function(d) stan_lmer(scaled_vol ~ SEX + (SEX | name) + (1 | ID)
+                                   , data = d
+                                   , open_progress = FALSE)))
+```
+
+### Summarizing performance
+
+To see how the two models perform we're going to look at performance
+on a few measures.
+
+1. Expected log predictive density (ELPD) from Pareto Smoothed Importance Sampling
+   Leave-One-Out Cross Validation (PSIS-LOOCV) using the `loo` package.
+2. Log-likelihood of the volume data given the models
+3. Mean squared error of the predicted volume
+4. Fisher-transformed correlation between the observed parameters
+   and the simulated parameters at the leaves
+5. Fisher-transformed correlation between the observed parameters
+   and the simulated parameters at the parent nodes
+6. Approximate Log-likelihood of the simulated effects given the model
+
+Here, ELPD measures the generalization of the models. The log-likelihood 
+of the volumes, and mean squared error are somewhat redundant alternatives
+for measuring model fit. The effect correlation and log-likelihood of the 
+simulated effects measure the ability to recover the known input parameters.
+
+Additionally, `mcmc_area` figures were generated for examining the posterior
+distribution of the effects. Warnings are suppressed in the following code
+block.
+
+```{r extract_res, cache = TRUE, dependson = "fit_models", warning = FALSE, message = FALSE}
+model_results <-  
+  model_fits %>%
+  ## Note pmaps in this mutate can be here because they don't depend on
+  ## preceding results within the mutation
+  mutate(
+    # Compute the PSIS-LOOCV
+    lmer_loo = map(slmer, ~ loo(log_lik(.)))
+  , edt_loo = map(edt, ~ loo(extract(.)$logLik))
+    
+    # Extract the LOO expected log predictive density
+  , lmer_elpd = map_dbl(lmer_loo, ~ .$estimates["elpd_loo", "Estimate"])
+  , edt_elpd = map_dbl(edt_loo, ~ .$estimates["elpd_loo", "Estimate"])
+    
+    # Extract model summary data
+  , lmer_res =
+      pmap(., function(slmer, tree, sds, ...) 
+        get_sglm_results(slmer, tree, sds))
+  , edt_res =
+      pmap(., function(edt, tree, sds, ...)
+        get_ept_results(edt, tree, sds))
+    
+    # Compute fisher transformed correlation at the leaves
+  , lmer_cor = 
+      map2_dbl(lmer_res, effects, ~ atanh(cor(.x$effects[leaves], .y[leaves])))
+  , edt_cor =
+      map2_dbl(edt_res, effects, ~ atanh(cor(.x$effects[leaves], .y[leaves])))
+    
+    # Compute fisher transformed correlation at the parent nodes
+  , lmer_parcor =
+      map2_dbl(lmer_res, effects, ~ atanh(cor(.x$effects[parents], .y[parents])))
+  , edt_parcor =
+      map2_dbl(lmer_res, effects, ~ atanh(cor(.x$effects[parents], .y[parents])))
+    
+    # Get log-likelihood of the volumes given the models
+  , lmer_logLik = map_dbl(slmer, ~ median(log_lik(.)))
+  , edt_logLik = map_dbl(edt, ~ median(extract(.)$logLik))
+    
+    # Compute the mean square error
+  , lmer_mse = map2_dbl(slmer, hept, ~ mean((.y$y - fitted(.x))^2))
+  , edt_mse = map2_dbl(edt, hept, ~ mean((.y$y - fitted_ept(.x))^2))
+  ) %>%
+  ## Note pmaps in this block require data from the preceding mutations
+  mutate(
+    ## Generate ggplot objects with the effect posteriors
+    lmer_areas = 
+      pmap(., function(lmer_res, effects, sds, tree, ...)
+        effect_areas(lmer_res, effects, sds, tree))
+  , edt_areas =
+      pmap(., function(edt_res, effects, sds, tree, ...)
+        effect_areas(edt_res, effects, sds, tree))       
+    ## Compute the pointwise effect log-likelihoods
+  , lmer_pwllb = 
+      pmap(., function(lmer_res, effects, sds, tree, ...)
+        pw_effect_loglik(lmer_res, effects, sds, tree))
+  , edt_pwllb =
+      pmap(., function(edt_res, effects, sds, tree, ...)
+        pw_effect_loglik(edt_res, effects, sds, tree))
+    
+    ## Sum the pointwise log-likelihood
+  , lmer_llb = map_dbl(lmer_pwllb, sum)
+  , edt_llb = map_dbl(edt_pwllb, sum)
+  )
+```
+
+## Simulation Results
+
+Now we'll transform the results into something a little more readable
+
+```{r}
+model_results %>%
+  select_if(~ !is.list(.)) %>%
+  gather(measure, score, lmer_elpd:edt_llb) %>%
+  separate(measure, into = c("model", "measure")) %>%
+  spread(measure, score)
+```
+
+So the results are pretty interesting, it seems as though the 
+diffusion tree model and the `stan_lmer` model perform equivalently
+on elpd and MSE, but the diffusion tree substantially underperforms
+on coefficient recapture.
+
+Let's examine the posteriors for the effects.
+
+```{r}
+model_results$lmer_areas[[5]] + ggtitle("Effect posterior (stan_lmer)")
+model_results$edt_areas[[5]] + ggtitle("Effect posterior (diffusion tree)")
+```
+
+Looks like the diffusion tree is estimating substantially wider posterior
+distributions than the `stan_lmer` model. This pattern becomes even more evident
+when running on a larger subset of the tree (data not shown). 
+
+These results suggest that we should move forward using the `stan_lmer` model 
+instead of the diffusion tree.
+
+## Posterior Differences
+
+Part of the motivation for the diffusion tree was the ability to
+estimate the difference between parent and child nodes directly.
+Turns out we can recover this feature from the `stan_lmer` model.
+
+To do this, we can add our posterior distributions for our effects back to 
+the tree. From there we can compute the difference in effect between a node 
+and its parent. We'll take model 4, with SNR = 1 with an additional taxonomy
+based effect as an example.
+
+```{r}
+difference_tree <-
+  compute_differences(model_results$lmer_res[[4]]
+                    , model_results$tree[[4]])
+```
+
+Now each node has extra attributes `b_post` with the effect posterior
+and `b_diff` with the posterior difference between its effect and 
+its parent. The posterior differences across the whole tree look
+like:
+
+```{r}
+difference_matrix <-
+  difference_tree$Get("b_diff", simplify = FALSE) %>%
+  simplify2array
+
+mcmc_areas(difference_matrix) + ggtitle("Effect change from parent")
+```
+
+Let's pull out one leaf node and its entire ancestry to
+see how this looks.
+
+```{r}
+parent_of <-
+  function(node, name)
+    name %in% node$Get("name")
+
+left_diff_matrix <-
+  difference_tree$Get("b_diff"
+                    , pruneFun =
+                        function(n)
+                          parent_of(n, "left Lateral visual area")
+                    , simplify = FALSE) %>%
+  simplify2array
+
+left_diff_matrix %>%
+  mcmc_areas + ggtitle("Effect change from parent (left lateral visual)")
+```
+
+Here it looks like there is a large change between the visual areas (the root node)
+and Lateral visual areas (where we induced a hierarchical effect), the left lateral visual
+area seems to be undoing some of the change induced at its parent.
+
+Now let's examine the right side
+
+```{r}
+right_diff_matrix <-
+  difference_tree$Get("b_diff"
+                    , pruneFun =
+                        function(n)
+                          parent_of(n, "right Lateral visual area")
+                    , simplify = FALSE) %>%
+  simplify2array
+
+right_diff_matrix %>%
+  mcmc_areas + ggtitle("Effect change from parent (right lateral visual)")
+```
+
+It looks like the right lateral visual area behaves like its parent.
+
+## Interpreting Posterior Differences
+
+After examining the difference posteriors we can make descision regarding where in the
+brain taxonomy an effect originates by checking if the credible interval for the
+difference bounds zero. This gives us two ways to examine the localization of effects 
+in the brain, first standard effect effect estimation, and second, difference 
+estimation to identify effect sources.
+
+## On Real Data
+
+Let's try the posterior difference strategy on some real data to see if we can recover
+known regions of sex effects. Here we'll read in an external run of the full data set
+of 140 mice using the entire tree. The full tree has 336 leaf nodes, 254 interior nodes,
+with a maximum depth of 12. On a four core machine this took ~5 hours to run.
+
+```{r real-data, cache = TRUE}
+full_tree <- readRDS("full_tree.rds")
+real_mod <- readRDS("real-data-lmer.rds")
+
+real_nodes <- full_tree$Get("name")
+real_sds <-
+  real_mod$data %>%
+  group_by(name) %>%
+  slice(1) %>%
+  ungroup() %>%
+  with(setNames(sd_vol, name)) %>%
+  .[real_nodes]
+
+real_res <- get_sglm_results(real_mod, full_tree, real_sds)
+```
+
+Since the number of nodes is large, we'll subset down to the parameters where the
+90% credible interval doesn't overlap zero.
+
+```{r}
+post_intervals <- posterior_interval(real_res$b_post)
+nz_intervals <- post_intervals[sign(post_intervals[,1]) == sign(post_intervals[,2]),]
+
+rownames(nz_intervals)
+```
+
+These results are promising, three of the structures -- the medial amygdala, the
+bed nucleus of the stria terminalis, and the medial preoptic nucleus -- which are
+well known to be sexually dimorphic appear in this result list.
+
+Let's have a look at those structures.
+
+```{r}
+known_dimorph_regions <-
+  grep("Bed nuclei|Medial preoptic|Medial amygdala"
+     , rownames(nz_intervals)
+     , value = TRUE)
+
+mcmc_areas(real_res$b_post[,known_dimorph_regions])
+```
+
+Now let's see which structures come up as having credible intervals of the
+differences not bounding zero.
+
+```{r}
+real_difference_tree <- compute_differences(real_res, full_tree)
+post_diff <- real_difference_tree$Get("b_diff", simplify = FALSE) %>% simplify2array
+
+post_diff_intervals <- posterior_interval(post_diff)
+nz_diff_intervals <-
+  post_diff_intervals[sign(post_diff_intervals[,1]) == sign(post_diff_intervals[,2]) , ]
+
+mcmc_areas(post_diff[,rownames(nz_diff_intervals)])
+```
+
+Interesting to note the Striatum-like amygdalar nucleus is one of the four regions with
+detected changes from its parent. This is the parent structure
+of the medial amygdala one of the dimorphic regions noted above. This suggests that
+the sexual dimorphism observed in the medial amygdala is at least in part a 
+consequence of an effect higher in the brain structure taxonomy.
+
+## Concluding and Future Directions
+
+In this notebook we've seen that for considering brain taxonomy `stan_lmer` outperforms
+the more complicated effect diffusion model. Additionally, by making good use of
+our posterior distribtions we can still ask questions regarding the taxonomic origins
+of an observed effect.
+
+I was disappointed that the effect diffusion model performed poorly on simulated
+effect recapture. These experiments didn't (remotely) exhaustively examine possible 
+combinations of simulated effect patterns. It is possible there are cases 
+where the diffusion tree is superior. It may be the case 
+that in larger models with more covariates the effect diffusion prior 
+may improve estimates.
+
+There are also many alternative approaches to addressing these questions. One tempting
+approach is to apply a spatial gaussian process prior over the model errors, although it 
+is unclear how to combine this with the taxonomy tree. Applying a gaussian process
+to structures by tree distance was unsuccessful in some earlier experiments.
+
+Region based analyses are really just the begining. Our acquired images are
+10s of millions of individuals observations (voxels, a 3D pixel). Prematurely summarizing
+into regions probably discards considerable useful information about effect localization.
+Ideally we'd like to extend this approache to the voxel level, possibly by using an 
+expectation propagation strategy.
