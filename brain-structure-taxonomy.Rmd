@@ -605,7 +605,7 @@ is unclear how to combine this with the taxonomy tree. Applying a gaussian proce
 to structures by tree distance was unsuccessful in some earlier experiments.
 
 Region based analyses are really just the begining. Our acquired images are
-10s of millions of individuals observations (voxels, a 3D pixel). Prematurely summarizing
+10s of millions of individual observations (voxels, 3D pixels). Prematurely summarizing
 into regions probably discards considerable useful information about effect localization.
-Ideally we'd like to extend this approache to the voxel level, possibly by using an 
+Ideally we'd like to extend this approach to the voxel level, possibly by using an 
 expectation propagation strategy.
