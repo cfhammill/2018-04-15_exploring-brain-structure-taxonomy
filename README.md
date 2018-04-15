@@ -6,8 +6,8 @@ brain structure taxonomy with stan.
 To recompile the rmarkdown file, first clone this repository
 
 ```
-git clone https://github.com/cfhammill/2018-04-15_stancon-helsinki-submission
-cd 2018-04-15_stancon-helsinki-submission
+git clone https://github.com/cfhammill/2018-04-15_exploring-brain-structure-taxonomy
+cd 2018-04-15_exploring-brain-structure-taxonomy
 ```
 
 Recompiling the rmarkdown document requires tidyverse and my package
