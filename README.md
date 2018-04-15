@@ -30,5 +30,6 @@ To recompile the rmarkdown document. Assuming `hierarchyTrees`
 is installed:
 
 ```
+touch brain-structure-taxonomy.Rmd
 make 
 ```
