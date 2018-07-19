@@ -458,7 +458,7 @@ labels getting over-written, and some from `loo` indicating slightly high pareto
 for several of the parental models.
 
 ```{r extract_res, cache = TRUE, dependson = "fit_models", warning = FALSE, message = FALSE}
-model_results <- readRDS("simulation_results.rds")
+model_fits <- readRDS("simulation_results.rds")
 
 model_results <-
   model_fits %>%
