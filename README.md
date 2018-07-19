@@ -57,3 +57,13 @@ brew install nlopt
 If this option fails install according to `NLopt`'s instructions
 
 https://nlopt.readthedocs.io/en/latest/NLopt_Installation/
+
+### Extra data
+
+Not all the data used in this analysis is included in this git repository.
+Particularly the `stanfit` for the effect diffusion tree is quite large (~3G).
+The document can be rendered happily without it, and most summary data
+is provided by the serialized R data files in this repository. However,
+if you'd like to play with the full fitted model it can be downloaded from:
+
+http://repo.mouseimaging.ca/repo/chammill/real-data-edt.rds
