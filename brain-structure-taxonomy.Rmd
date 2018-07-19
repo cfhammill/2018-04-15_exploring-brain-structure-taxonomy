@@ -1,7 +1,7 @@
 ---
 title: Analyzing Brain Structure Trees with Stan
 author: Chris Hammill and Jason Lerch
-date: April 13, 2018
+date: July 19, 2018
 output:
   html_document:
     fig_caption: yes
@@ -18,6 +18,7 @@ bibliography: references.bib
 <script>
 $("
 </script>
+
 
 ```{r}
 ## Figure counter https://stackoverflow.com/questions/13848137/figure-captions-references-using-knitr-and-markdown-to-html
@@ -86,8 +87,8 @@ From the perspective of shared
 development, it is natural to consider the structures in an atlas as the leaves of 
 a taxonomy tree. Parent nodes in the tree indicate collections of structures with 
 shared development. These higher order structures are also useful for defining the location
-of effects. Conveniently for us, a large brain imaging group --
-the Allen Brain Institute (ABI) -- has organized their mouse brain histological atlas in just 
+of effects. Conveniently for us, a large brain science group --
+the Allen Institute for Brain Science -- has organized their mouse brain histological atlas in just 
 such a way [@lein2007genome]. 
 
 <br>
@@ -96,14 +97,14 @@ such a way [@lein2007genome].
 </p>
 <br>
 
-The Allen brain taxonomy tree defines structure relations as a recursive subdivison of the
+The Allen brain taxonomy tree defines structure relations as a recursive subdivision of the
 brain. The root node of the tree is the whole brain, the first division is by tissue type,
 dividing the brain into grey and white matter. The grey matter is subdivided into cerebrum
 and cerebellum, and this subdivision process continues until the the structures cannot
 be further separated into discernible parts. These terminal (leaf) structures are roughly
-equivalent to the structures in our MRI atlas. By unifing our nomenclature to match the Allen 
+equivalent to the structures in our MRI atlas. By unifying our nomenclature to match the Allen 
 structures, we can combine our MRI atlas with their taxonomy tree. This allows us to divide the 
-mouse brain into a hierarchy of structures. This gives us a vocabularly for higher-order structures 
+mouse brain into a hierarchy of structures. This gives us a vocabulary for higher-order structures 
 and additional information about structure relatedness.
 
 ## The problem
@@ -117,7 +118,7 @@ There are some problems with this approach:
 
 1. Regions are not independent, proximity in space or similarity by development
   cause regions to receive similar genetic and environmental effects.
-1. Regions are not homogeneous, the structure volume effects variance, with small
+1. Regions are not homogeneous, the structure volume affects variance, with small
   structures having high noise
 1. Partitioning effort isn't uniform across the brain. "Interesting regions" get 
    subdivided into smaller regions. 
@@ -138,7 +139,7 @@ the typical focus of these models is either to replace the per structure
 linear model with a bayesian model [@friston2002classicalA; @friston2002classicalB;
 @woolrich2009bayesian] or to induce spatial dependence across the brain 
 [@siden2017fast; @penny2005bayesian]. 
-The closest approach to ours is that of Bowman et al [-@bowman2008bayesian], where they
+The closest approach to ours is that of Bowman et al. [-@bowman2008bayesian], where they
 perform a multi-step modelling approach with per voxel (3D pixel) linear modelling 
 followed by hierarchical modelling of the coefficients within and between structures. No
 other approach, to our knowledge, has attempted to model additional taxonomic organization of
@@ -147,19 +148,20 @@ the brain.
 ## The Models
 
 In order to accomplish our goals, we're going to try three different
-bayesian models that will encourage pooling between structures.
+classes of bayesian models that will encourage pooling between structures.
 
 1. A standard hierarchical model fit with `rstanarm`'s `stan_lmer` function.
    With pooling between all structures, regardless of position in the brain
    taxonomy.
-1. A hierarchical model fit with `rstanarm` that incorporates taxonomy information,
-   by pooling effects across parent structures.
+1. Hierarchical models fit with `rstanarm` that incorporate taxonomy information
+   by pooling effects across higher-order structures. Typically by adding extra
+   pooled effects across some depth of the tree. Examples explored below.
 1. A tree based model where effects diffuse down the tree as a gaussian
    random walk. 
    
-This third model we've termed the effect diffusion tree. In this model,
-the covariate effect at each child node is the effect at their parent plus 
-some gaussian noise. Encouraging effects to pool by ancestry. It is
+This third class of models we've termed effect diffusion trees. In the effect diffusion
+tree models the covariate effect at each child node is the effect at their parent plus 
+some gaussian noise, encouraging effects to pool by ancestry. It is
 a small change to the model used in `stan_lmer`. The distinction will be
 explained below. 
 
@@ -193,7 +195,7 @@ multivariate normal distribution.
 $$ \boldsymbol{\beta}_s = \Sigma^{1/2} \boldsymbol{\epsilon}_{s} $$
 
 Where $\Sigma$ is the 2x2 covariance matrix for the two parameters and
-$\Sigma^{1/2}$ is its cholesky factor.
+$\Sigma^{1/2}$ is its Cholesky factor.
 
 The effect diffusion model modifies this slightly by centering group specific
 parameters on the value of their parent.
@@ -202,11 +204,14 @@ $$ \boldsymbol{\beta}_s = \boldsymbol{\beta}_{p_s} + \Sigma^{1/2} \boldsymbol{\e
 
 Where $p_s$ is the index of the parent node.
 
-Both models use an lkj prior for $\Sigma$. For the effect diffusion model
-this is the covariance parameter for the change in effect associated with
-taking a step from a parent to a child node. Originally the model had been
-formulated such that each parent node had their own covariance parameter,
-unfortunately, these models couldn't be fit due to divergences, so only 
+all models discussed use a `decov` prior for $\Sigma$, which decomposes the covariance
+matrix into a variance vector and a correlation matrix, placing a gamma prior on
+the variance and a Lewandowski-Kurowicka-Joe (LKJ) prior on the correlations.
+For the effect diffusion model, the prior on $\Sigma$ establishes a prior on the 
+change in effect associated with taking a step from a parent to a child node. 
+
+Originally the model was formulated such that each parent node had their own covariance matrix,
+unfortunately, this model couldn't be fit due to divergences, so only 
 one global covariance is estimated.
   
 ## The data
@@ -228,8 +233,8 @@ compare the performance of the models with some simulations.
 ## Simulations
 
 To check that the effect diffusion tree induces a reasonable prior, we're going to
-simulate some data and try to recover our simulate parameters with the
-effect diffusion tree and the two `stan_lmer` models..
+simulate some data and try to recover our simulated parameters with the
+effect diffusion tree and the two `stan_lmer` models.
 
 ### Init
 
@@ -287,7 +292,7 @@ vols_hierarchical
 ### Simulation function
 
 We're going to define a utility function to create trees given the following 
-characterestics
+characteristics
 
 1. noise_sd: What sd should the simulated noise have.
 2. leaf_effects: A vector of effects to add at the leaf nodes.
@@ -382,10 +387,11 @@ models for the whole grid. This takes about an hour to run
 on a four core computer, so the results were saved and this code
 won't be run when rendering this document.
 
-Three models were fit
+Three models were fit:
 
-1. A "flat" `stan_lmer` model, `y ~ sex + (sex | structure) + (1 | ID)`, with pooling across all structures, in code as `slmer`
-2. A hierarchical `stan_lmer`
+1. A "flat" `stan_lmer` model, `y ~ sex + (sex | structure) + (1 | ID)`, with pooling across all structures, in code as `slmer`.
+2. A hierarchical `stan_lmer` that has an additional effect of parent structure `y ~ sex + (sex | structure) + (sex | parent) + (1 | ID)`, termed the parental model, `hslmer` in code.
+3. The effect diffusion tree, in code as `edt`.
 
 ```{r fit_models, cache = TRUE, dependson = c("grid2", "compilation"), eval = FALSE}
 model_fits <-
@@ -428,13 +434,15 @@ on a few measures.
 1. Expected log predictive density (ELPD) from Pareto Smoothed Importance Sampling
    Leave-One-Out Cross-Validation (PSIS-LOOCV) using the `loo` package.
 2. Log-likelihood of the volume data given the models. 
-3. Mean squared error of the predicted volume, $\frac{1}{N}\sum_{i=0}^N(y_i - \hat{y_i})^2$
+3. Mean squared error of the predicted volume, $\frac{1}{N}\sum_{i=1}^N(y_i - \hat{y_i})^2$.
 4. Fisher-transformed correlation between the estimated parameters
-   and the simulated parameters at the leaves, $atanh(cor(\boldsym{\beta}, \boldsym{\hat{\beta}}))$
-   where $\boldsym{\hat{\beta}}$ is the vector of posterior median effect at the leaves.
+   and the simulated parameters at the leaves, 
+   $atanh(cor(\boldsymbol{\beta_l}, \boldsymbol{\hat{\beta_l}}))$.
+   where $\boldsymbol{\hat{\beta_l}}$ is the vector of posterior median effect at the leaves and
+   $\boldsymbol{\beta_l}$ is the vector of simulated effects at the leaves.
 5. Approximate log-likelihood of the simulated effects given the model. This
    is computed as 
-   $\sum_s log \left( \mathcal{N}(\beta_s | \mathbb{E}(\hat{\beta_s}), sd(\hat{\beta_s})) \right)$ 
+   $\sum_s log \left( \mathcal{N}(\beta_s ~|~ \mathbb{E}(\boldsymbol{\hat{\beta_s}}), sd(\boldsymbol{\hat{\beta_s}})) \right)$ 
    where $s$ indexes structures, mean and sd are computed from the posterior samples.
 
 All measures except ELPD are computed within sample. The ELPD measures the generalization 
@@ -446,7 +454,8 @@ simulated effects measure the ability to recover the known input parameters.
 Additionally, `mcmc_area` figures were generated for examining the posterior
 distribution of the effects. Warnings are suppressed in the following code
 block. The suppressed warnings are from `ggplot2` indicating the axis 
-label gets over-written.
+labels getting over-written, and some from `loo` indicating slightly high pareto-k values
+for several of the parental models.
 
 ```{r extract_res, cache = TRUE, dependson = "fit_models", warning = FALSE, message = FALSE}
 model_results <- readRDS("simulation_results.rds")
@@ -662,7 +671,7 @@ as its parent.
 
 ## Interpreting Posterior Differences
 
-After examining the difference posteriors we can make descisions regarding where in the
+After examining the difference posteriors we can make decisions regarding where in the
 brain taxonomy an effect originates by checking if the credible interval for the
 difference bounds zero. This gives us two ways to examine the localization of effects 
 in the brain, first using standard structure specific effect estimation, and second, 
@@ -679,8 +688,8 @@ with a maximum depth of 12. Four models were run on the real data:
     as the "flat" model, in code as `lmer`.
 1. `stan_lmer` with `y ~ sex + (sex | structure) + (sex | parent) + (1 | ID)`, referred
     to as the "parental" model, in code as `hlmer`.
-1. `stan_lmer` with `y ~ sex + (sex | structure) + (sex | parent) + (sex | grandparent) + (1 | ID)`, referred to as the "grand parental" model, in code as `h2lmer`.
-1. The effect diffusion model.
+1. `stan_lmer` with `y ~ sex + (sex | structure) + (sex | parent) + (sex | grandparent) + (1 | ID)`, referred to as the "grand-parental" model, in code as `h2lmer`.
+1. The effect diffusion model, in code as `edt`
 
 ```{r real-data, cache = TRUE}
 full_tree <- readRDS("full_tree.rds")
@@ -724,9 +733,18 @@ check_all_diagnostics(real_h2lmer$stanfit)
 ```
 
 Effect diffusion tree:
-```{r}
+```{r, eval = FALSE}
 check_all_diagnostics(real_edt)
 ```
+
+<pre><code class="hljs">## [1] "n_eff / iter looks reasonable for all parameters"
+## [1] "Rhat for parameter L_omega[1,1] is NaN!"
+## [1] "Rhat for parameter L_omega[1,2] is NaN!"
+## [1] "Rhat for parameter L_sigma[1,2] is NaN!"
+## [1] "  Rhat above 1.1 indicates that the chains very likely have not mixed"
+## [1] "0 of 4000 iterations ended with a divergence (0%)"
+## [1] "0 of 4000 iterations saturated the maximum tree depth of 10 (0%)"
+## [1] "E-BFMI indicated no pathological behavior"</code></pre>
 
 All diagnostics are passing. The `NaN!` warnings for the effect diffusion tree are
 from triangular matrices and are to be expected.
@@ -824,12 +842,12 @@ Effect diffusion tree:
 real_edt_loo
 ```
 
-So the effect diffusion tree is performing marginally better than both
-`stan_lmer` models, with an edge in both ELPD and effect correlation 
-against the flat model, and virtually identical to the parental model. 
-The effect diffusion tree has a slightly worse ELPD than the grand-parental model. 
-The effect diffusion tree also has more effective parameters than the 
-grand-parental model.
+So the effect diffusion tree is performing marginally better than two of the
+three `stan_lmer` models. The effect diffusion tree has an edge in both ELPD 
+and effect correlation against the flat model, and virtually identical to 
+the parental model. The effect diffusion tree has a slightly worse ELPD than 
+the grand-parental model. The effect diffusion tree also has more effective 
+parameters than the grand-parental model.
 
 ## Localizing Sex Effects
 
@@ -887,7 +905,7 @@ tree. The grand-parental model identified the fewest structures, half as many as
 flat model.
 
 Let's compare the list of structures for the three models, we'll compute
-the jaccard similarity of each set of elements. The Jacard similarity is
+the Jaccard similarity of each set of elements. The Jaccard similarity is
 defined as the ratio of sizes of the intersection of two sets over their union:
 $\frac{|A\cap B|}{|A\cup B|}$.
 
@@ -906,10 +924,9 @@ sapply(nz_interval_list
 ```
 
 Interestingly the most similar pairs of sets of identified structures are the
-effect diffusion tree and the flat `stan_lmer` as well as the effect diffusion tree
-and `stan_lmer` with parent information included. The `stan_lmer` including 
-grandparent information was most dissimilar from the rest and identified the 
-fewest structures.
+effect diffusion tree and the flat model as well as the effect diffusion tree
+and parental model. The grand-parental model was 
+most dissimilar from the rest and identified the fewest structures.
 
 ### Examining known sexually dimorphic regions
 
@@ -941,14 +958,54 @@ list(lmer = length(lmer_dimorph)
 
 So we see the `stan_lmer` with parent information recovers all 6, the
 flat `stan_lmer` and effect diffusion tree identify 4/6, and the `stan_lmer`
-with grand parent information recovers only two.
+with grand-parent information recovers only two. Only the parental model identified
+the left and right medial preoptic nucleus. Let's examine the posterior distributions
+for these structures.
+
+```{r, fig.cap = fig$cap("preoptic", "Posterior distributions for the sex effects in the medial preoptic nuclei across four bayesian models. Pale bands show 50% credible intervals, dark blue lines show posterior medians.")}
+list(`Flat model` = real_lmer_res
+     , `Parental model` = real_hlmer_res
+   , `Grand-parental model` = real_h2lmer_res
+   , `Effect Diffusion Tree` = real_edt_res) %>%
+  map(~ .$b_post[,c("left Medial preoptic nucleus"
+                  , "right Medial preoptic nucleus")]) %>%
+  imap( ~ `colnames<-`(.x, paste0(.y, ": ", colnames(.x)))) %>%
+  reduce(cbind) %>%
+  mcmc_areas     
+```
+
+So it looks as though the effect diffusion tree has very broad posteriors for
+the preoptic nuclei, the flat model is estimating slightly less broad posteriors
+and slightly larger effects. The grand-parental model is estimating narrow posteriors
+with smaller effects, where the parental model is estimating relatively large effects
+with reasonably narrow posteriors. To examine why this might be the case let's look
+at the preoptic nuclei and their immediate neighbours (members of the hypothalamic medial zone)
+with both the effect diffusion and parental models:
+
+```{r, fig.cap = fig$cap("hmz_edt", "Posterior distributions for the sex effects in the hypothalamic medial zone in the effect diffusion model. Pale bands show 50% credible intervals, dark blue lines show posterior medians.")}
+hmz <-
+  FindNode(full_tree, "left Medial preoptic nucleus")$
+  parent$
+  parent$
+  Get("name", filterFun = isLeaf)
+
+mcmc_areas(real_edt_res$b_post[, hmz])
+```
+
+```{r, fig.cap = fig$cap("hmz_edt", "Posterior distributions for the sex effects in the hypothalamic medial zone in the parental model. Pale bands show 50% credible intervals, dark blue lines show posterior medians.")}
+mcmc_areas(real_hlmer_res$b_post[, hmz])
+```
+
+Examining the neighbours of the preoptic nucleus we find the mammillary bodies, which have an 
+effect in the opposite direction, so the effect diffusion tree is pooling more strongly between 
+the neighbours. 
 
 ### Viewing all identified structures
 
-We'll compare the identified structures for the parental model and the
+For completeness, let's compare the identified structures for the parental model and the
 effect diffusion model, as those two identified the greatest number of structures.
 
-```{r, fig.cap = fig$cap("p_flat", "Posterior distributions for the effect of sex at each leaf node in the parental `stan_lmer` model where the 90% credible does not bound zero. Pale bands show 50% credible intervals, dark blue lines show posterior medians."), fig.height = 10}
+```{r, fig.cap = fig$cap("p_flat", "Posterior distributions for the effect of sex at each leaf node in the parental `stan_lmer` model where the 90% credible does not bound zero. Pale bands show 50% credible intervals, dark blue lines show posterior medians."), fig.height = 12}
 mcmc_areas(real_hlmer_res$b_post[,rownames(hlmer_nz_intervals)])
 ```
 
@@ -968,12 +1025,12 @@ differences not bounding zero.
 ```{r, fig.cap = fig$cap("pdiff_edt", "Posterior distributions for the difference in sex effects between a node and its parent such that the 90% posterior interval does not bound zero. Pale bands show 50% credible intervals, dark blue lines show posterior medians.")}
 real_difference_tree <- Clone(full_tree)
 real_node_names <- real_difference_tree$Get("name")
-real_diff_posterior <- real_edt_res$b_extra
+real_b_posterior <- real_edt_res$b_extra
 
 real_difference_tree$Do(function(n){
   node_num <- match(n$name, real_node_names)
   n$b_diff <-
-    real_diff_posterior[, paste0("b[", node_num, ",2]") ]
+    real_b_posterior[, paste0("b[", node_num, ",2]") ]
 })
 
 real_difference_tree$Do(function(n){
@@ -1026,7 +1083,7 @@ over the model errors, although it  is unclear how to combine this with the taxo
 tree to detect change points. Applying a gaussian process to structures by tree 
 distance was unsuccessful in some earlier experiments.
 
-Region based analyses are really just the begining. Our acquired images are
+Region based analyses are really just the beginning. Our acquired images are
 tens of millions of individual observations (voxels, 3D pixels). Prematurely summarizing
 into regions probably discards considerable useful information about effect localization.
 Ideally we'd like to extend this approach to the voxel level, possibly by using an 
