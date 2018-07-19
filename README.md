@@ -10,12 +10,13 @@ git clone https://github.com/cfhammill/2018-04-15_exploring-brain-structure-taxo
 cd 2018-04-15_exploring-brain-structure-taxonomy
 ```
 
-Recompiling the rmarkdown document requires tidyverse and my package
-`hierarchyTrees`. To install `hierarchyTrees` and its dependencies
+Recompiling the rmarkdown document requires tidyverse and our package
+`hierarchyTrees`. 
+
+install `hierarchyTrees` and its dependencies
 (assuming `devtools` is installed) you can run:
 
 ```
-## Warning this runs devtools install which may update packages
 make depends
 ```
 
@@ -33,3 +34,26 @@ is installed:
 touch brain-structure-taxonomy.Rmd
 make 
 ```
+
+
+### Install issues
+
+This package depends on `rstanarm` which via `lme4`
+depends on `nloptr` which requires developer header for `NLopt`. If you have 
+difficulty installing `hierarchyTrees` please try:
+
+Ubuntu:
+
+```
+sudo apt-get install libnlopt-dev
+```
+
+MacOS:
+
+```
+brew install nlopt
+```
+
+If this option fails install according to `NLopt`'s instructions
+
+https://nlopt.readthedocs.io/en/latest/NLopt_Installation/
