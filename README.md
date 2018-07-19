@@ -28,7 +28,7 @@ R CMD INSTALL hierarchyTrees/
 ```
 
 To recompile the rmarkdown document. Assuming `hierarchyTrees`
-is installed:
+is installed (warning, this downloads 550M of simulation data).
 
 ```
 touch brain-structure-taxonomy.Rmd
@@ -66,4 +66,4 @@ The document can be rendered happily without it, and most summary data
 is provided by the serialized R data files in this repository. However,
 if you'd like to play with the full fitted model it can be downloaded from:
 
-http://repo.mouseimaging.ca/repo/chammill/real-data-edt.rds
+repo.mouseimaging.ca/repo/chammill/stancon_helsinki_files/real-data-edt.rds
